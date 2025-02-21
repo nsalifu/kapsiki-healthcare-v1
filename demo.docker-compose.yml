@@ -1,0 +1,82 @@
+services:
+  certbot:
+    image: certbot/certbot
+    container_name: openmrs-certbot
+    volumes:
+      - ./nginx/certs/demo.healthcare.kapsiki.net:/etc/letsencrypt
+      - ./nginx/certs/demo.healthcare.kapsiki.net:/var/lib/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  proxy:
+    image: openmrs/openmrs-reference-application-3-gateway:${TAG:-qa}
+    container_name: openmrs-proxy
+    restart: "unless-stopped"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/certs/demo.healthcare.kapsiki.net/fullchain.pem:/etc/nginx/certs/demo.healthcare.kapsiki.net/fullchain.pem
+      - ./nginx/certs/demo.healthcare.kapsiki.net/privkey.pem:/etc/nginx/keys/demo.healthcare.kapsiki.net/privkey.pem
+    depends_on:
+      - frontend
+      - backend
+      - certbot
+    ports:
+      - "80:80"
+      - "443:443"
+
+  frontend:
+    image: openmrs/openmrs-reference-application-3-frontend:${TAG:-qa}
+    container_name: openmrs-frontend
+    restart: "unless-stopped"
+    environment:
+      SPA_PATH: /openmrs/spa
+      API_URL: /openmrs
+      SPA_CONFIG_URLS: /openmrs/spa/config-core_demo.json
+      SPA_DEFAULT_LOCALE: "en"  # Set default locale
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://gateway/"]  # Ensure the gateway is up
+      timeout: 5s
+    depends_on:
+      - backend
+
+  backend:
+    image: openmrs/openmrs-reference-application-3-backend:${TAG:-qa}
+    container_name: openmrs-backend
+    restart: "unless-stopped"
+    depends_on:
+      - db
+    environment:
+      OMRS_CONFIG_MODULE_WEB_ADMIN: "true"
+      OMRS_CONFIG_AUTO_UPDATE_DATABASE: "true"
+      OMRS_CONFIG_CREATE_TABLES: "true"
+      OMRS_CONFIG_CONNECTION_SERVER: db
+      OMRS_CONFIG_CONNECTION_DATABASE: openmrs
+      OMRS_CONFIG_CONNECTION_USERNAME: ${OPENMRS_DB_USER:-root}
+      OMRS_CONFIG_CONNECTION_PASSWORD: ${OPENMRS_DB_PASSWORD:-openmrs}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://backend:8080/openmrs"]  # Update healthcheck endpoint
+      timeout: 5s
+    volumes:
+      - openmrs-data:/openmrs/data
+
+  db:
+    image: mysql:8.2.0  # Use a stable version of MySQL
+    container_name: openmrs-db
+    restart: "unless-stopped"
+    command: "mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci"
+    ports:
+      - 3306:3306
+    healthcheck:
+      test: "mysql --user=${OMRS_DB_USER:-root} --password=${OMRS_DB_PASSWORD:-openmrs} --execute \"SHOW DATABASES;\""
+      interval: 3s
+      timeout: 1s
+      retries: 5
+    environment:
+      MYSQL_DATABASE: openmrs
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-openmrs}
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./my.cnf:/etc/my.cnf  # Ensure this file exists
+
+volumes:
+  openmrs-data: ~
+  db-data: ~

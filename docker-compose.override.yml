@@ -1,0 +1,19 @@
+
+version: "3.7"
+
+services:
+  gateway:
+    build:
+      context: ./gateway
+    image: kapsiki/kapsiki-openmrs-nginx:${TAG:-latest}
+
+  frontend:
+    build:
+      context: ./frontend
+    image: kapsiki/kapsiki-openmrs-frontend:${TAG:-latest}
+
+
+  backend:
+    build:
+      context: .
+    image: kapsiki/kapsiki-openmrs-backend:${TAG:-latest}
